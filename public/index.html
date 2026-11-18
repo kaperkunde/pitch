@@ -1,0 +1,991 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes"><title>Touchline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: a dugout tablet under floodlights. Pitch is the hero; the coach's command bar sits under it like a clipboard; the note and history ride beside it on wide screens. Deliberate single dark look. */
+:root {
+  color-scheme: dark;
+  --bg: #0d1714;
+  --panel: #14221d;
+  --panel-2: #1b2c26;
+  --line: #2a3f37;
+  --fg: #e9f1ec;
+  --muted: #93a89f;
+  --grass-a: #1f6b3e;
+  --grass-b: #237545;
+  --chalk: rgba(255,255,255,.82);
+  --home: #2f7cf6;
+  --home-ink: #ffffff;
+  --away: #f2c230;
+  --away-ink: #1a1405;
+  --accent: #57e3a0;
+  --warn: #ff8a6b;
+  --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.wrap {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding-block: 14px 22px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 14px;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+h1 {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 34px;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  margin: 0;
+  line-height: 1;
+}
+h1 span { color: var(--accent); }
+.tag {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 4px 0 0;
+}
+.status {
+  font-family: var(--display);
+  font-size: 13px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.dot.on { background: var(--accent); box-shadow: 0 0 0 4px rgba(87,227,160,.18); }
+.dot.off { background: var(--warn); }
+
+.main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } }
+
+.board { display: grid; gap: 12px; min-width: 0; }
+.pitch-box {
+  position: relative;
+  background: #123d24;
+  border-radius: 14px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+svg.pitch { display: block; width: 100%; height: auto; max-height: 70vh; touch-action: none; user-select: none; -webkit-user-select: none; }
+.thinking {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  background: rgba(8,20,14,.38);
+  pointer-events: none;
+}
+.thinking .pill {
+  font-family: var(--display); font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  background: var(--panel); border: 1px solid var(--line); color: var(--fg);
+  padding: 10px 16px; border-radius: 999px; font-size: 16px;
+  display: flex; align-items: center; gap: 10px;
+}
+.spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.player { transition: transform .9s cubic-bezier(.3,.7,.2,1); cursor: grab; }
+.player.dragging { transition: none; cursor: grabbing; }
+.ball { transition: transform .9s cubic-bezier(.3,.7,.2,1); }
+.halo { animation: pulse 1.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes pulse { 0%,100% { opacity: .9; transform: scale(1); } 50% { opacity: .35; transform: scale(1.35); } }
+.overlay-in { animation: fadein .5s ease .7s both; }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .player, .ball { transition: none; }
+  .halo, .overlay-in, .spin { animation: none; }
+}
+
+.command {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+.row { display: flex; gap: 10px; align-items: stretch; }
+.mic {
+  flex: none;
+  width: 58px; height: 58px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--panel-2);
+  color: var(--fg);
+  display: grid; place-items: center;
+  cursor: pointer;
+}
+.mic svg { width: 26px; height: 26px; }
+.mic.live { background: var(--warn); border-color: var(--warn); color: #1a0b06; animation: pulse-ring 1.2s ease-out infinite; }
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(255,138,107,.6); } 100% { box-shadow: 0 0 0 14px rgba(255,138,107,0); } }
+.field { flex: 1; min-width: 0; position: relative; }
+textarea#prompt {
+  width: 100%;
+  min-height: 58px;
+  resize: none;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  font: 500 17px/1.35 var(--body);
+  padding: 9px 12px;
+}
+textarea#prompt::placeholder { color: var(--muted); }
+.partial { position: absolute; left: 12px; bottom: -18px; font-size: 12px; color: var(--muted); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; right: 12px; }
+button.go {
+  flex: none;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 20px;
+  background: var(--accent);
+  color: #062615;
+  font: 800 18px/1 var(--display);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+button.go:disabled { opacity: .6; cursor: progress; }
+button:focus-visible, textarea:focus-visible, .chip:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font: 500 14px/1.2 var(--body);
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--accent); }
+.tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.tools .left { display: flex; gap: 8px; flex-wrap: wrap; }
+.ghost {
+  border: 1px solid var(--line); background: transparent; color: var(--muted);
+  border-radius: 10px; padding: 7px 12px; font: 600 13px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; cursor: pointer;
+}
+.ghost:hover { color: var(--fg); }
+label.toggle { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 14px; cursor: pointer; }
+label.toggle input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+aside { display: grid; gap: 12px; min-width: 0; }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+}
+.eyebrow {
+  font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+  margin: 0 0 6px;
+}
+.move-title { font-family: var(--display); font-weight: 800; font-size: 26px; line-height: 1.05; margin: 0 0 8px; text-wrap: balance; text-transform: uppercase; letter-spacing: .01em; }
+.note { margin: 0; font-size: 16px; }
+.note.err { color: var(--warn); }
+.legend { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+.legend div { display: flex; align-items: center; gap: 8px; }
+.sw { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+.ln { width: 22px; height: 0; border-top: 2px solid var(--fg); flex: none; }
+.ln.dash { border-top-style: dashed; }
+ol.history { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+ol.history li b { color: var(--fg); font-weight: 600; }
+.empty { color: var(--muted); font-size: 14px; margin: 0; }
+.how { font-size: 13px; color: var(--muted); margin: 0; }
+@media (max-width: 560px) {
+  h1 { font-size: 28px; }
+  textarea#prompt { font-size: 16px; }
+  button.go { padding: 0 14px; font-size: 16px; }
+  .mic { width: 50px; height: 50px; }
+}
+
+.timeline { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; display: grid; gap: 10px; }
+.tl-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tl-sep { flex: 1; }
+.tl-play { border: 0; border-radius: 10px; padding: 9px 18px; min-width: 84px; background: var(--fg); color: var(--bg); font: 800 16px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.tl-play:disabled, .ghost:disabled { opacity: .45; cursor: not-allowed; }
+.ghost[aria-pressed="true"] { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+select { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px; font: 500 15px var(--body); }
+.frames { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.frame { flex: none; display: flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); border-radius: 10px; padding: 7px 10px; cursor: pointer; font: 500 14px/1.2 var(--body); max-width: 220px; }
+.frame.on { border-color: var(--accent); color: var(--fg); box-shadow: inset 0 0 0 1px var(--accent); }
+.fn { font: 800 15px/1 var(--display); color: var(--accent); }
+.fl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fz { font: 700 10px/1 var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--bg); background: var(--muted); border-radius: 4px; padding: 3px 4px; }
+.tl-edit { gap: 14px; }
+.mini { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+.mini input { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: 500 15px var(--body); width: 150px; }
+.mini input[type=number] { width: 76px; }
+svg.pitch.playing .player, svg.pitch.playing .ball { transition: none; }
+svg.pitch.zooming { cursor: crosshair; }
+.zoombox { fill: rgba(87,227,160,.12); stroke: #57e3a0; stroke-width: .4; stroke-dasharray: 1.2 .8; }
+.zoom-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--accent); color: var(--fg); border-radius: 999px; padding: 6px 12px; font-size: 13px; pointer-events: none; white-space: nowrap; }
+.ball { cursor: grab; }
+ol.sources { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+ol.sources a { color: var(--accent); overflow-wrap: anywhere; }
+svg.pitch { transition: none; }
+@media (max-width: 560px) { .mini input { width: 120px; } .zoom-hint { white-space: normal; width: 80%; text-align: center; } }
+
+  .badge-footer {
+    margin: 0;
+    padding: 24px 16px 20px;
+    text-align: center;
+    font-family: var(--body, "Barlow", system-ui, sans-serif);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted, #93a89f);
+  }
+  .badge-footer p {
+    margin: 0 auto;
+    max-width: 36em;
+    padding-top: 14px;
+    border-top: 1px solid var(--line, #2a3f37);
+  }
+  .badge-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: var(--line, #2a3f37);
+    text-underline-offset: 3px;
+    border-radius: 3px;
+    white-space: nowrap;
+    transition: color 0.15s, text-decoration-color 0.15s;
+  }
+  .badge-link:hover {
+    color: var(--accent, #57e3a0);
+    text-decoration-color: currentColor;
+  }
+  .badge-link:focus-visible {
+    outline: 2px solid var(--accent, #57e3a0);
+    outline-offset: 3px;
+  }
+  .badge-icon {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    border-radius: 3px;
+  }
+
+</style></head><body>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Touch<span>line</span></h1>
+      <p class="tag">Say what you want on the pitch. Claude moves the players.</p>
+    </div>
+    <div class="status" aria-live="polite"><span class="dot" id="aiDot"></span><span id="aiStatus">Connecting to Claude…</span></div>
+  </header>
+
+  <div class="main">
+    <div class="board">
+      <div class="pitch-box">
+        <svg class="pitch" id="pitch" viewBox="-4 -4 113 76" role="img" aria-label="Football pitch with 22 players">
+          <defs>
+            <marker id="ah-home" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fbaff"/></marker>
+            <marker id="ah-away" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ffe08a"/></marker>
+            <marker id="ah-ball" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ffffff"/></marker>
+          </defs>
+          <g id="grass"></g>
+          <g id="lines" fill="none" stroke="rgba(255,255,255,.82)" stroke-width=".25"></g>
+          <g id="zones"></g>
+          <g id="arrows"></g>
+          <g id="players"></g>
+          <g id="ballLayer"></g>
+        </svg>
+        <div class="zoom-hint" id="zoomHint" hidden>Drag a box over the part of the pitch to zoom this frame to</div>
+        <div class="thinking" id="thinking" hidden><div class="pill"><span class="spin"></span><span id="thinkingText">Claude is reading the pitch…</span></div></div>
+      </div>
+
+      <div class="timeline" aria-label="Play frames">
+        <div class="tl-row">
+          <button type="button" class="tl-play" id="play" aria-label="Play">Play</button>
+          <label class="toggle"><input type="checkbox" id="loop" checked> Loop</label>
+          <label class="toggle">Speed
+            <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+          </label>
+          <span class="tl-sep"></span>
+          <button type="button" class="ghost" id="addFrame">+ Frame</button>
+          <button type="button" class="ghost" id="delFrame">Delete frame</button>
+          <button type="button" class="ghost" id="zoomBtn" aria-pressed="false">Zoom</button>
+          <button type="button" class="ghost" id="fullBtn">Full pitch</button>
+        </div>
+        <div class="frames" id="frames"></div>
+        <div class="tl-row tl-edit">
+          <label class="mini">Frame name <input id="frameLabel" type="text" maxlength="40"></label>
+          <label class="mini">Seconds to get here <input id="dur" type="number" min="0.2" max="10" step="0.1" inputmode="decimal"></label>
+        </div>
+      </div>
+
+      <form class="command" id="form" autocomplete="off">
+        <div class="row">
+          <button type="button" class="mic" id="mic" aria-label="Speak an instruction" title="Speak an instruction" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+          </button>
+          <div class="field">
+            <textarea id="prompt" rows="2" placeholder="e.g. Press high, front three on their centre-backs, number 8 jumps onto their 6"></textarea>
+            <div class="partial" id="partial"></div>
+          </div>
+          <button type="submit" class="go" id="go">Show it</button>
+        </div>
+        <div class="chips" id="chips"></div>
+        <div class="tools">
+          <div class="left">
+            <button type="button" class="ghost" id="undo">Undo</button>
+            <button type="button" class="ghost" id="reset">Kick-off shape</button>
+          </div>
+          
+        </div>
+      </form>
+    </div>
+
+    <aside>
+      <div class="card" aria-live="polite">
+        <p class="eyebrow">For the player</p>
+        <h2 class="move-title" id="moveTitle">Kick-off shape</h2>
+        <p class="note" id="note">Blue 4-3-3 against a yellow 4-4-2. Tap the mic or type an instruction, then press Show it. You can also drag any player first.</p>
+      </div>
+      <div class="card">
+        <p class="eyebrow">Key</p>
+        <div class="legend">
+          <div><span class="sw" style="background:var(--home)"></span>Blue: us, attacking left to right</div>
+          <div><span class="sw" style="background:var(--away)"></span>Yellow: opponent</div>
+          <div><span class="ln"></span>Run or press</div>
+          <div><span class="ln dash"></span>Pass</div>
+          <div><span class="sw" style="border:2px solid var(--accent)"></span>The player the coach means</div>
+          <div><span class="ln" style="border-top-color:#fff;border-top-style:dashed"></span>Ball path</div>
+        </div>
+      </div>
+      <div class="card" id="sourcesCard" hidden>
+        <p class="eyebrow">Claude looked up</p>
+        <ol class="sources" id="sources"></ol>
+      </div>
+      <div class="card">
+        <p class="eyebrow">This session</p>
+        <ol class="history" id="history"></ol>
+        <p class="empty" id="historyEmpty">No instructions yet.</p>
+      </div>
+      <p class="how">Claude works out the positions and can search the web for a team's or coach's style. Ask for "a play" to get frames that move; build your own with + Frame, dragging players and the ball. Space plays and pauses, arrow keys step through frames.</p>
+    </aside>
+  </div>
+</div>
+
+<footer class="badge-footer">
+  <p>
+    Made in 10 min by
+    <a class="badge-link" href="https://kaperkunde.com" target="_blank" rel="noopener">
+      <img class="badge-icon" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAAPKklEQVRo3s1aCVxU17m/ERONogiiRqOCC8vA7PfOwjDMCrJvxkENmyyiNlGJNYoa32jeS15ibeOW+EuxNYltJMY0Mca9YolG+6tNGn0vrTGvsU8JLuCCa8LMPd/7vjuAoKCgvKbz+x24zD3n+//POd92vgPH9dznEd8vRWDgyOj5do32UJZBuJauF2rV0erf+AVHpuFLP/D1e4T7F/v0kn4OjBofq9KceDnLBvOTzKzQor9RYjM0LU2zwvNJZoiMVO3muPFD2k/4x/+0EtEqNAfWTLJDnFrzRy4wKqkvN24U91hkeJ8R8pkTY3Sn6J1Mpv7kX231/aSf/uHm8oRYyNLzpzhu1Aj6CoB7BNzNu8OFqafF6S/PT4wFzl9maTf2x/1Ye9PP4DHqkmXpVpDLlJX09wGr7/u2H5uar16Fu+A/Sjmz7dgfTXWsSHKLy+VbxcERtmecJjCptF9yXKjKLyDCxgVGpnLB0Wl9B8niOG5MfLpBaJgTb6IdiKMhNNbqm2ivf67OIzC06v7Ix7mACHtAiHxdjErrnWI2QpkjxluRYoZl6RapLcLnGU6TmGsxQoxS0xQUqljPBUYkctwQf0nVmmX+fxh2rzaNhPu5OXfzao0Z5j8ieolZw598PikOfpvrhG15FnjPZWCVGTysTdGw15I14mtJGpGe8TtG77bnW2BzngMnFQd2LX8qYKT8P7i+aOz48clunUhb7O56FWtvMsAOjRVXvN9wxcIJPN+wfrID9kyzsQ0ZWvE5q9qbF29jpU/nwvzy+WzZ8pfYypWvATV6pu/oXS72KbeoPZXpvLi3yMYqpzgg1SA0BoxSvIgudqAPw9XOuH1cJFW7/w65b88Yf9PKjA17bEBEhCsq6jEuQKaRy1Rfrphog/3FdvbqBLU3xxIrznm2HN7fshX+ceIr8Fw6B/DDVWCeawCeq1KTnvE7ekd9qC+NceHYV1BGdYmdrXbZQROt+Zq8WRnPP0qYhI1tdMviubuwG9IM+z4RVSjI1Z9PMemuFFl0N5ME7S2/4VFV2TH6+l0lCbAxW+fJNhnFxUuXw8n/+hLg+0ZgTY0AVy8AXKwD74UzHTZ6R32kvjiGxi5BGVkoa2OW4NlXmgBTzYYrfUZEfZgo8DeKEXtyrNCoU2i+6DNMXsTdK4q3GOWQEPmqeYlm2FPkEPeVONlnZU6oSIyBrBgDHJ7hZPPiFOKUqQVw7OifALzXgF2rB7GZIGv4zkfyHo36UF8aQ2NJBsmaijKfQ9l/mukUJ6MjmI+Yh8ocQBz2FjtEjOwwNFS5ti3XNp8WVxidPgtd4Wdldu8LySYWp+aP6xXqq05egDXZsd5ik5otcb8ETdcaAG5e9BGpvz/pzhqNlXYGZZHMF1A2YaxDrHhBAINSc9Os1v43cvEenu7wPEMueKgs6y47cbt9niUiUv3eBwV2WJFlgYEj5W6uf3hOXpwBd8MGLp2KrVu/AUC8Dl5cRbFFJXqgSTtIu4eyCWMSYiEmQ3cM3EDZzH4jFEteyYyDDwukVGRrW85tc5lH7Tx/vLrUCRONwhkM/ZZMo+78oRnxUGhUstWvvwnAboCni6rS3UYySTZhEFYBYh5GbLSJq5zfuKQso/Bt9XQnOHj+rxyHDqUN99aAlCDw/3MAJ2BVa79+cpz60PbiBFhkU4rPL3Kjrl6/bYg9SPrOxZAwEOv5xW6oQOw9aNjjIzVfmpTab4hboiD8g+OG9e9gAsP7oW8/daDEAUalRlyQHMuqJhnYpOwcuE6u8VJdj648o528dBb1//JdkyIswnQh9rvI4cX0OIZRnlUjt2SBP9PJBIb1T9Lxp9HiIcMgiFvzrCzXJMDvDxxAl3e5x1afCIrnT0tu1HOhFk7u/Aia7pAtYSEmYROH3+VbGR6OxD1FdkjR8d+1pCB3TGCIf7KOr6VOT8cZxGVONZTP/akUgHrKYGnVRXoWb8CVo5/BWrMJ3vq3xdIusPrauwybsInD8ng1cjKy3cgtTS/UdTqBVD1ft7vIAXlmHcsy8vDZoYMo/BK6u9qeWfVbl6Vo/PnLy+HfBwyAWfJoOP+/3wA0YnC7wx1LmIhNHLKNAnLSs104gQw9f47jggZ2MIHBA9L0/Nnq0nhwyKNYzpR8gOsND633rbqOq362Zh9stphhee/ekNevP2zbWCmpknihttOJE4fJyIU47UduqN71HBcyqIMJjA7EfL2+piwBFOPC2C/WvCHlMQ+q+15cQe/5MxLBJiRycEkFrAoMgJf69YMSJF+RnAjXaVdwcp0tkoSNHF5DLvKxYaymLB4yDcIldDjBbSfgi2j9xmuKLHrx4wIbhEeo2J8PHwK4cfGB1IfGMNx+wCTuwq6PoUrPw6t+veBnQUEwK2gw5AYGwacfvS/p/r3kS++QA3EZj5y25Vuh1GZg3OMRQmuG7G4++vmPVvy8crIdVqYZPOGCHW7UnQK4fK7bKiT1v3EJaqqroWLOPEgfPhpXPABWDQmGZwcHw9Tej8J/FuSBB/Ue7iNbkoUciAtxejVV7/nVFDsEjIpeLUXj1mNrkKwkL07vPYSJW7JKzlKzpwJcOX9fgA5XDA117bo3IItXwMokLaybbINChwmsw0OhtL8/FD05Eo4dqpYm2aXdJQ7IJQ05JSK3g8ixADWFC44qk7hr5Oojc+Jj2KfTHcydZgZ7lAwqZj+LAJe7pT5SXzS4v/z5qOQ19hRaYEexEz7Gbd9fYodcWwzYe/eDN386VyJPbpN1VS5yWYScnHIZvJBqBuJanmBivFz9R+6DfDvsnmYT58YbWKpBD6uTNbCw/Dk0vu4ZsGSwmAK8vHI1VFhVsBvJb8m1Su2TQhusyIiBBK0Rao8fBcA0mnUxi/U2x4MFyGlNigYyMa2f7TQw4kzcue2Fdso2vXFqLcs2GWBTFg/PzS6XvEdXJyDp6pVzcOH0KQizTIHFCQJQPKl62grvYdtT4oSlTg38hOTe6t7O+qJyI5TjCW5TtkABDUxqLewqtInEnUPiJxYkmtg+PCLmY9WgyKiAhbNm4ipdvCs6dg6C/X64DO6Vv4Q+8iyw6GPhQzzgU+Tci+TJs5mjo6Hqnbe7PQGJA3IhTiXILRcnQFwXJpnAgklncwyTzUL3JO7GPMiplDNX1iT4oaFZQJd0vx7+dvwYjLEUQoitGAbLnXgYUcH8CSaYbdWCSaGERRWLQWyovb1jXSHf/Ju4TM6eBA7kRtF4ht3IuKDIZ31HyebC1JBQxYZ3cx2wNMngCZHHQP23JyTrvx+YL+RfhLKKFRAoTIVQQyaMCFPD4yNk0H9kFEwrnQU1uz4BETPM7rpl1uyBiEuoIgaWTNB7q7AkM3SM8q023Jt9KVbS5sbHwNY8GwseFQm/37XTl4XeL9Ag+Zqag/CEqQBCjNkoXAH+T4SByZIAOzZvwjznvKQ27GL303EJm7JS5DJ4ZCQ5BDYPdxWrI/FtS5MtB5qgVB1/rnp6PESPCWMLlr4oHbjvZcjSgQSNN3vmMhiizoDA0dHwxFgFLJg3H86dOObT94a6B09HpFTiGixELsRp//SWXCg8uINcKKSvk+dPktFl8ioxLTEVrp4705yrdGK431+CD7bvg0GKdAgYKQOLIwn2/m6Lr3SCTeyir+94ceok7EbkkI5ciNNedM0TeO23Ujmzowkk8Pw3u6bZMdIZxDyDEt6tqgJoutud+kL8WUxTzoI2pQSCUW3cixZBw9+/8uU3lD4/ZAouYSL2bzdX0fkYORnFncgtSaDy/fB+nU6AXF9OrF58PUMPeZNyMGiev8tztOjmilVvgtGWAod3feRLvdHgHmbV2y0Q/iZs4vAGcsmJRS+J3CZIE7jHDtCREk9m4uY8OyuPU8Ka9ZVSucNDqW8bkKYL38GHVZvh/Mljvpye7OEhV72lSViISdhzkcPWfDtL1eORsvg+E0AbwJO/A/QKzfdTzcam6iIrS4s1wRd/+by1kHUb6LvmVb/QI6veTnUQizDTYmNhP3IotRtFLHV6iBsWHjq3AXx5kk5kCVrtF489qaz8JVaO38rWebMznoJL52sll9hWt8UOyiIPVeCq92EQFmH+GrE3Ydl+UIjyfZtG+wV5yESBjLhDG+AetWn44/tLpMJWA96yRBhV/MHdWMxdiTX+gsLpcBNXmzxMT9eHWlceZRMGYf0sUSPunz4BiBNWqBV493ZuP9aF7FrtV8i1XWELL0d80Th0vHrj5lw7VOZYYXy4ahvnF56FNaJrFP0qbCoxL78EGurocH5J0lOxB1afZEg6jzJJNmEsRKwt+Q6wqzVNXN/w/LHhqq1vuvDyJM8OYyPU77Tl3P6eNyjS6DLpPX8odbB3plqhIE5/MdMoNGKBla2aaPGuTdGKaSmZcPTIEcnIREwNKI1+EDWSqtQ4lmSQrKNHDkM6yl6DGGuesoiEieffa/nI4e0pViBO5B25wOjYdpzvnATe6RalCPzN1ydZYUcRltdnJIA71cy0cq13R3E8vOsyeNNj9OyVFb+AK7QbGClbgpZHqlbXtpYMKRj5mu/vdn3oLgHHkgySRTJ/85TBu7c0gcWoefZCSiwQNnF4w2WFVJ1wq8/I6NLOyLffiT5hYweNli+VR6l2CnJNdVSkuqbXUNlMZZT68FqXA2pKbN4Kq9I7MSmFrV23Hk6f/CuqwBW8ibkq1XKk/AcDHZUIpUbP9B2+k/pg3zM4hsY+hTIWWpRekklOQ1Boj/UaJp8TJdMcEPDiHG+EdiEXN9dn/Lj7kec6up9qX8GO8g8cLV+FFWPvtqJ42JEXK2Lx1zPZaWOzn5kDGzZshCOffgp1f/8aGs+ehlsYK6jRM31H76gP9aUxWLz1kIxPcGenWY1s6OjoX1F5p7N/RXB1zK3jnaD7Wzfesku37dIlm7uX+/b/ROjHhil2l9pjxPcK4vGizwq/zhTYYrvKU2bTe3MT7GJ+ZgYrzskBavRM39G7RdhnYyZe8OGYrYXx7Cd4oRIZoarhBvlu730YeI3bjEscevIu+ZF2qzBAZhgxVlmZrBPqKvDa9O2nnWxboQOPe1baHdg2NQabCXbi82787mN8h36dLUmNA4ysF0aNU27iBkVaW8g1y/5nXHq7/NrekEilvqDICQEhiuVymXq7Wc3/LVGnu5xu0InUEnXoyfA+WR6l2Tk4VPGydIPPjRjc7obI5Xqg/5v4P0nRPk1s8IGSAAAAAElFTkSuQmCC" alt="" width="16" height="16">Kaperkunde.com</a>
+    with help from
+    <a class="badge-link" href="https://pcp.gg" target="_blank" rel="noopener">
+      <img class="badge-icon" src="data:image/png;base64,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" alt="" width="16" height="16">pcp.gg</a>
+  </p>
+</footer>
+<script>
+(() => {
+  "use strict";
+  const NS = "http://www.w3.org/2000/svg";
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, attrs = {}, parent) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (parent) parent.appendChild(n);
+    return n;
+  };
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const num = (v, d) => (v !== null && v !== "" && Number.isFinite(Number(v)) ? Number(v) : d);
+  const r1 = (v) => Math.round(v * 10) / 10;
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+
+  // ---------- Model ----------
+  // state = { pitch, roster: [{id, team, n, role}], frames: [Frame], cur, title, note, sources }
+  // Frame = { label, dur (s, time to move INTO this frame), pos: {id: {x, y}}, ball: {x, y}, zoom: {x, y, w, h} | null, arrows, highlight }
+  const HOME = [
+    ["H1", 1, "GK", 5, 34], ["H2", 2, "RB", 20, 58], ["H3", 4, "CB", 17, 41], ["H4", 5, "CB", 17, 27], ["H5", 3, "LB", 20, 10],
+    ["H6", 6, "DM", 30, 34], ["H7", 8, "CM", 38, 46], ["H8", 10, "CM", 38, 22],
+    ["H9", 7, "RW", 48, 60], ["H10", 9, "ST", 50, 34], ["H11", 11, "LW", 48, 8],
+  ];
+  const AWAY = [
+    ["A1", 1, "GK", 100, 34], ["A2", 2, "RB", 84, 10], ["A3", 5, "CB", 87, 27], ["A4", 4, "CB", 87, 41], ["A5", 3, "LB", 84, 58],
+    ["A6", 7, "RM", 70, 12], ["A7", 6, "CM", 72, 28], ["A8", 8, "CM", 72, 40], ["A9", 11, "LM", 70, 56],
+    ["A10", 9, "ST", 58, 30], ["A11", 10, "ST", 58, 40],
+  ];
+  const kickoff = () => {
+    const rows = [...HOME.map((r) => ["home", ...r]), ...AWAY.map((r) => ["away", ...r])];
+    const pos = {};
+    for (const [, id, , , x, y] of rows) pos[id] = { x, y };
+    return {
+      pitch: { length: 105, width: 68 },
+      roster: rows.map(([team, id, n, role]) => ({ id, team, n, role })),
+      frames: [{ label: "Start", dur: 1.5, pos, ball: { x: 52.5, y: 34 }, zoom: null, arrows: [], highlight: [] }],
+      cur: 0,
+      title: "Kick-off shape",
+      note: "Blue 4-3-3 against a yellow 4-4-2. Speak or type an instruction, or ask for a play (\"show a give-and-go down the left in 4 steps\"). Drag players or the ball to build frames by hand.",
+      sources: [],
+    };
+  };
+
+  let state = kickoff();
+  const undoStack = [];
+  const history = [];
+  const frame = () => state.frames[state.cur];
+  const W = () => state.pitch.length;
+  const H = () => state.pitch.width;
+  const fullView = () => ({ x: -4, y: -4, w: W() + 8, h: H() + 8 });
+  const pushUndo = () => { undoStack.push(clone(state)); if (undoStack.length > 40) undoStack.shift(); };
+
+  // ---------- Pitch ----------
+  let drawnFor = "";
+  function drawPitch() {
+    const Wd = W(), Hd = H();
+    const key = Wd + "x" + Hd;
+    if (key === drawnFor) return;
+    drawnFor = key;
+    const grass = $("grass"); grass.replaceChildren();
+    el("rect", { x: -60, y: -60, width: Wd + 120, height: Hd + 120, fill: "#1a5c35" }, grass);
+    const band = Wd / 10;
+    for (let i = 0; i < 10; i++) el("rect", { x: i * band, y: 0, width: band, height: Hd, fill: i % 2 ? "#237545" : "#1f6b3e" }, grass);
+    const sx = Wd / 105, sy = Hd / 68;
+    const L = $("lines"); L.replaceChildren();
+    L.setAttribute("transform", `scale(${sx} ${sy})`);
+    L.setAttribute("stroke-width", (.25 / Math.max(.2, (sx + sy) / 2)).toFixed(3));
+    el("rect", { x: 0, y: 0, width: 105, height: 68 }, L);
+    el("line", { x1: 52.5, y1: 0, x2: 52.5, y2: 68 }, L);
+    el("circle", { cx: 52.5, cy: 34, r: 9.15 }, L);
+    el("circle", { cx: 52.5, cy: 34, r: .35, fill: "rgba(255,255,255,.82)" }, L);
+    for (const side of [0, 1]) {
+      const x0 = side ? 105 : 0, dir = side ? -1 : 1;
+      el("rect", { x: side ? 105 - 16.5 : 0, y: 13.84, width: 16.5, height: 40.32 }, L);
+      el("rect", { x: side ? 105 - 5.5 : 0, y: 24.84, width: 5.5, height: 18.32 }, L);
+      el("circle", { cx: x0 + dir * 11, cy: 34, r: .35, fill: "rgba(255,255,255,.82)" }, L);
+      const dx = 16.5 - 11, dy = Math.sqrt(9.15 * 9.15 - dx * dx);
+      const ax = x0 + dir * 16.5;
+      el("path", { d: `M ${ax} ${34 - dy} A 9.15 9.15 0 0 ${side ? 0 : 1} ${ax} ${34 + dy}` }, L);
+      el("rect", { x: side ? 105 : -2, y: 30.34, width: 2, height: 7.32, fill: "rgba(255,255,255,.12)" }, L);
+    }
+  }
+  function setView(v) {
+    $("pitch").setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+  }
+
+  // ---------- Players and ball ----------
+  const nodes = new Map();
+  function ensurePlayer(p) {
+    let node = nodes.get(p.id);
+    if (node && node.team !== p.team) { node.g.remove(); nodes.delete(p.id); node = null; }
+    if (node) return node;
+    const home = p.team === "home";
+    const g = el("g", { class: "player", "data-id": p.id, role: "img" }, $("players"));
+    const halo = el("circle", { r: 2.9, fill: "none", stroke: "#57e3a0", "stroke-width": .45, class: "halo" }, g);
+    halo.style.display = "none";
+    el("circle", { r: 2.05, fill: "rgba(0,0,0,.28)", cy: .35 }, g);
+    el("circle", { r: 1.9, fill: home ? "#2f7cf6" : "#f2c230", stroke: home ? "#cfe0ff" : "#5a4508", "stroke-width": .25 }, g);
+    const t = el("text", { "text-anchor": "middle", "dominant-baseline": "central", "font-size": 1.9, "font-family": "Barlow Condensed, Arial Narrow, sans-serif", "font-weight": 800, fill: home ? "#ffffff" : "#1a1405", y: .1 }, g);
+    const lab = el("text", { "text-anchor": "middle", "font-size": 1.3, "font-family": "Barlow, sans-serif", "font-weight": 600, fill: "rgba(255,255,255,.85)", y: 3.6 }, g);
+    node = { g, halo, t, lab, team: p.team };
+    nodes.set(p.id, node);
+    attachDrag(g, () => p.id);
+    return node;
+  }
+  let ballNode;
+  function ensureBall() {
+    if (ballNode) return ballNode;
+    ballNode = el("g", { class: "ball" }, $("ballLayer"));
+    el("circle", { r: 1.6, fill: "transparent" }, ballNode);
+    el("circle", { r: .95, fill: "#ffffff", stroke: "#111", "stroke-width": .2 }, ballNode);
+    el("circle", { r: .32, fill: "#111" }, ballNode);
+    attachDrag(ballNode, () => "ball");
+    return ballNode;
+  }
+  const place = (g, x, y) => { g.style.transform = `translate(${x}px, ${y}px)`; };
+
+  // Draw a frame (or an in-between) without touching overlays/labels.
+  function drawPositions(pos, ball, view) {
+    for (const p of state.roster) {
+      const q = pos[p.id]; if (!q) continue;
+      place(ensurePlayer(p).g, q.x, q.y);
+    }
+    place(ensureBall(), ball.x, ball.y);
+    setView(view);
+  }
+
+  function render() {
+    drawPitch();
+    const f = frame();
+    const live = new Set(state.roster.map((p) => p.id));
+    for (const [id, node] of nodes) if (!live.has(id)) { node.g.remove(); nodes.delete(id); }
+    for (const p of state.roster) {
+      const node = ensurePlayer(p);
+      node.t.textContent = p.n ?? "";
+      node.lab.textContent = p.role || "";
+      node.g.setAttribute("aria-label", `${p.team === "home" ? "Blue" : "Yellow"} ${p.n} ${p.role}`);
+      node.halo.style.display = f.highlight.includes(p.id) ? "" : "none";
+    }
+    drawPositions(f.pos, f.ball, f.zoom || fullView());
+    drawArrows(f);
+    $("moveTitle").textContent = state.title || "Untitled";
+    const note = $("note"); note.textContent = state.note || ""; note.classList.remove("err");
+    renderTimeline();
+    renderSources();
+  }
+
+  function drawArrows(f) {
+    const A = $("arrows");
+    A.replaceChildren();
+    if (!f) return;
+    for (const a of f.arrows || []) {
+      const from = a.from, to = a.to;
+      if (!from || !to) continue;
+      const team = a.team === "away" ? "away" : a.team === "ball" ? "ball" : "home";
+      const kind = a.kind === "pass" || team === "ball" ? "pass" : "run";
+      const color = team === "away" ? "#ffe08a" : team === "ball" ? "#ffffff" : "#8fbaff";
+      const dx = to.x - from.x, dy = to.y - from.y, len = Math.hypot(dx, dy);
+      if (len < 3) continue;
+      const s = 2.3 / len, e = 1 - 1.2 / len;
+      const x1 = from.x + dx * s, y1 = from.y + dy * s, x2 = from.x + dx * e, y2 = from.y + dy * e;
+      const bend = kind === "pass" ? 0 : Math.min(4, len * .12);
+      const mx = (x1 + x2) / 2 - (dy / len) * bend, my = (y1 + y2) / 2 + (dx / len) * bend;
+      el("path", {
+        d: `M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`, fill: "none", stroke: color, "stroke-width": .4,
+        "stroke-dasharray": kind === "pass" ? "1.2 .8" : "none", "marker-end": `url(#ah-${team})`,
+        "stroke-linecap": "round", class: "overlay-in", opacity: .95,
+      }, A);
+    }
+  }
+
+  // ---------- Pointer: dragging players/ball, drawing a zoom box ----------
+  function toPitch(evt) {
+    const svg = $("pitch");
+    const m = svg.getScreenCTM(); if (!m) return null;
+    const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
+    const r = pt.matrixTransform(m.inverse());
+    return { x: r.x, y: r.y };
+  }
+  let drag = null;
+  function attachDrag(g, idOf) {
+    g.addEventListener("pointerdown", (e) => {
+      if (busy || playing || zoomMode) return;
+      e.preventDefault(); e.stopPropagation();
+      g.setPointerCapture(e.pointerId);
+      drag = { id: idOf(), g, moved: false, before: clone(state) };
+      g.classList.add("dragging");
+    });
+    g.addEventListener("pointermove", (e) => {
+      if (!drag || drag.g !== g) return;
+      const p = toPitch(e); if (!p) return;
+      const x = r1(clamp(p.x, 0, W())), y = r1(clamp(p.y, 0, H()));
+      const f = frame();
+      if (drag.id === "ball") f.ball = { x, y }; else f.pos[drag.id] = { x, y };
+      drag.moved = true;
+      place(g, x, y);
+    });
+    const end = () => {
+      if (!drag || drag.g !== g) return;
+      g.classList.remove("dragging");
+      if (drag.moved) { undoStack.push(drag.before); frame().arrows = []; drawArrows(frame()); }
+      drag = null;
+    };
+    g.addEventListener("pointerup", end);
+    g.addEventListener("pointercancel", end);
+  }
+
+  let zoomMode = false, box = null;
+  function setZoomMode(on) {
+    zoomMode = on;
+    $("zoomBtn").setAttribute("aria-pressed", String(on));
+    $("pitch").classList.toggle("zooming", on);
+    $("zoomHint").hidden = !on;
+  }
+  $("pitch").addEventListener("pointerdown", (e) => {
+    if (!zoomMode || busy || playing) return;
+    const p = toPitch(e); if (!p) return;
+    e.preventDefault();
+    $("pitch").setPointerCapture(e.pointerId);
+    box = { x0: p.x, y0: p.y, rect: el("rect", { class: "zoombox", x: p.x, y: p.y, width: 0, height: 0 }, $("arrows")) };
+  });
+  $("pitch").addEventListener("pointermove", (e) => {
+    if (!box) return;
+    const p = toPitch(e); if (!p) return;
+    box.rect.setAttribute("x", Math.min(box.x0, p.x)); box.rect.setAttribute("y", Math.min(box.y0, p.y));
+    box.rect.setAttribute("width", Math.abs(p.x - box.x0)); box.rect.setAttribute("height", Math.abs(p.y - box.y0));
+  });
+  const endBox = (e) => {
+    if (!box) return;
+    const p = toPitch(e) || { x: box.x0, y: box.y0 };
+    box.rect.remove();
+    const r = { x: Math.min(box.x0, p.x), y: Math.min(box.y0, p.y), w: Math.abs(p.x - box.x0), h: Math.abs(p.y - box.y0) };
+    box = null;
+    setZoomMode(false);
+    if (r.w < 4 && r.h < 4) return;
+    pushUndo();
+    frame().zoom = fitZoom(r);
+    render();
+  };
+  $("pitch").addEventListener("pointerup", endBox);
+  $("pitch").addEventListener("pointercancel", endBox);
+
+  // Grow a box to the pitch's aspect ratio so zooming never letterboxes.
+  function fitZoom(r) {
+    const full = fullView();
+    const aspect = full.w / full.h;
+    let w = Math.max(r.w, 12), h = Math.max(r.h, 12 / aspect);
+    if (w / h > aspect) h = w / aspect; else w = h * aspect;
+    w = Math.min(w, full.w); h = Math.min(h, full.h);
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    return { x: r1(clamp(cx - w / 2, full.x, full.x + full.w - w)), y: r1(clamp(cy - h / 2, full.y, full.y + full.h - h)), w: r1(w), h: r1(h) };
+  }
+
+  // ---------- Timeline ----------
+  function renderTimeline() {
+    const list = $("frames");
+    list.replaceChildren();
+    state.frames.forEach((f, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "frame" + (i === state.cur ? " on" : "");
+      b.setAttribute("aria-pressed", String(i === state.cur));
+      const n = document.createElement("span"); n.className = "fn"; n.textContent = i + 1;
+      const l = document.createElement("span"); l.className = "fl"; l.textContent = f.label || `Frame ${i + 1}`;
+      b.append(n, l);
+      if (f.zoom) { const z = document.createElement("span"); z.className = "fz"; z.textContent = "zoom"; b.append(z); }
+      b.addEventListener("click", () => { if (playing) stop(); state.cur = i; render(); });
+      list.append(b);
+    });
+    const many = state.frames.length > 1;
+    $("play").disabled = !many;
+    $("delFrame").disabled = !many;
+    $("fullBtn").disabled = !frame().zoom;
+    $("dur").value = String(frame().dur ?? 1.5);
+    $("frameLabel").value = frame().label || "";
+  }
+  $("addFrame").addEventListener("click", () => {
+    if (playing) stop();
+    pushUndo();
+    const f = clone(frame());
+    f.label = `Frame ${state.cur + 2}`; f.arrows = []; f.dur = 1.5;
+    state.frames.splice(state.cur + 1, 0, f);
+    state.cur += 1;
+    render();
+    flash("New frame: drag players and the ball to where they go next.");
+  });
+  $("delFrame").addEventListener("click", () => {
+    if (state.frames.length < 2) return;
+    if (playing) stop();
+    pushUndo();
+    state.frames.splice(state.cur, 1);
+    state.cur = Math.max(0, state.cur - 1);
+    render();
+  });
+  $("dur").addEventListener("change", () => { frame().dur = clamp(num($("dur").value, 1.5), .2, 10); });
+  $("frameLabel").addEventListener("change", () => { frame().label = $("frameLabel").value.trim().slice(0, 40); renderTimeline(); });
+  $("zoomBtn").addEventListener("click", () => { if (!playing) setZoomMode(!zoomMode); });
+  $("fullBtn").addEventListener("click", () => { pushUndo(); frame().zoom = null; render(); });
+
+  // ---------- Playback ----------
+  let playing = false, raf = 0;
+  const ease = (t) => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  const HOLD = 0.6;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const lerpView = (a, b, t) => ({ x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), w: lerp(a.w, b.w, t), h: lerp(a.h, b.h, t) });
+
+  function play() {
+    if (state.frames.length < 2) return;
+    if (zoomMode) setZoomMode(false);
+    playing = true;
+    $("pitch").classList.add("playing");
+    $("play").textContent = "Pause";
+    $("play").setAttribute("aria-label", "Pause");
+    let i = state.cur;
+    let phase = "hold", t0 = performance.now();
+    showFrame(i);
+    const step = (now) => {
+      if (!playing) return;
+      const speed = num($("speed").value, 1);
+      const dt = (now - t0) / 1000 * speed;
+      const n = state.frames.length;
+      if (phase === "hold") {
+        if (dt >= HOLD) {
+          const next = i + 1;
+          if (next >= n && !$("loop").checked) { stop(); return; }
+          phase = "move"; t0 = now; $("arrows").replaceChildren();
+        }
+      } else {
+        const j = (i + 1) % n;
+        const a = state.frames[i], b = state.frames[j];
+        const dur = Math.max(.2, num(b.dur, 1.5));
+        const t = Math.min(1, dt / dur), k = ease(t);
+        const pos = {};
+        for (const p of state.roster) {
+          const pa = a.pos[p.id], pb = b.pos[p.id] || pa;
+          if (pa && pb) pos[p.id] = { x: lerp(pa.x, pb.x, k), y: lerp(pa.y, pb.y, k) };
+        }
+        drawPositions(pos, { x: lerp(a.ball.x, b.ball.x, k), y: lerp(a.ball.y, b.ball.y, k) }, lerpView(a.zoom || fullView(), b.zoom || fullView(), k));
+        if (t >= 1) { i = j; showFrame(i); phase = "hold"; t0 = now; }
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+  }
+  function showFrame(i) {
+    state.cur = i;
+    const f = state.frames[i];
+    drawPositions(f.pos, f.ball, f.zoom || fullView());
+    drawArrows(f);
+    for (const p of state.roster) nodes.get(p.id).halo.style.display = f.highlight.includes(p.id) ? "" : "none";
+    document.querySelectorAll("#frames .frame").forEach((b, k) => { b.classList.toggle("on", k === i); b.setAttribute("aria-pressed", String(k === i)); });
+    $("dur").value = String(f.dur ?? 1.5);
+    $("frameLabel").value = f.label || "";
+  }
+  function stop() {
+    playing = false;
+    cancelAnimationFrame(raf);
+    $("pitch").classList.remove("playing");
+    $("play").textContent = "Play";
+    $("play").setAttribute("aria-label", "Play");
+    render();
+  }
+  $("play").addEventListener("click", () => (playing ? stop() : play()));
+
+  // ---------- Sources, history ----------
+  function renderSources() {
+    const card = $("sourcesCard"), list = $("sources");
+    list.replaceChildren();
+    card.hidden = !state.sources.length;
+    for (const s of state.sources) {
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.textContent = s.title || s.url;
+      li.append(a); list.append(li);
+    }
+  }
+  function addHistory(prompt, title) {
+    history.unshift({ prompt, title });
+    const ol = $("history");
+    ol.replaceChildren();
+    for (const h of history.slice(0, 6)) {
+      const li = document.createElement("li");
+      const b = document.createElement("b"); b.textContent = h.title || "Move";
+      li.append(b, document.createTextNode(` · “${h.prompt}”`));
+      ol.append(li);
+    }
+    $("historyEmpty").hidden = history.length > 0;
+  }
+  let flashTimer = 0;
+  function flash(msg) {
+    const n = $("note"); const keep = state.note;
+    n.textContent = msg; clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { n.textContent = keep; }, 3500);
+  }
+
+  // ---------- Claude ----------
+  let busy = false, ctl = null;
+
+  function boardForServer() {
+    const f = frame();
+    const s = {
+      pitch: state.pitch,
+      players: state.roster.map((p) => ({ id: p.id, shirt: p.n, role: p.role, x: f.pos[p.id]?.x, y: f.pos[p.id]?.y })),
+      ball: f.ball,
+      note: state.note,
+    };
+    if (state.frames.length > 1) {
+      s.currentFrame = state.cur + 1;
+      s.frames = state.frames.map((fr) => ({
+        label: fr.label, duration: fr.dur, zoom: fr.zoom,
+        ball: fr.ball,
+        positions: Object.entries(fr.pos).map(([id, q]) => ({ id, x: q.x, y: q.y })),
+      }));
+    }
+    return s;
+  }
+
+  const cleanArrows = (arr) => (Array.isArray(arr) ? arr.slice(0, 12) : []).filter((a) => a && a.from && a.to).map((a) => ({
+    from: { x: num(a.from.x, 0), y: num(a.from.y, 0) }, to: { x: num(a.to.x, 0), y: num(a.to.y, 0) },
+    team: a.team === "away" ? "away" : a.team === "ball" ? "ball" : "home", kind: a.kind,
+  }));
+  const cleanZoom = (z) => {
+    if (!z || ![z.x, z.y, z.w, z.h].every((v) => Number.isFinite(Number(v)))) return null;
+    if (+z.w >= W() - 1 && +z.h >= H() - 1) return null;
+    return fitZoom({ x: +z.x, y: +z.y, w: +z.w, h: +z.h });
+  };
+
+  function apply(res) {
+    if (!res || !Array.isArray(res.players) || !res.players.length) throw new Error("bad_shape");
+    if (res.pitch && Number.isFinite(+res.pitch.length) && Number.isFinite(+res.pitch.width)) {
+      state.pitch = { length: clamp(+res.pitch.length, 20, 120), width: clamp(+res.pitch.width, 15, 90) };
+    }
+    const roster = [];
+    const seen = new Set();
+    for (const p of res.players) {
+      const id = String(p?.id || "");
+      if (!/^[HA]\d{1,2}$/.test(id) || seen.has(id)) continue;
+      seen.add(id);
+      const prev = state.roster.find((q) => q.id === id);
+      roster.push({ id, team: id[0] === "H" ? "home" : "away", n: Number.isFinite(+p.shirt) ? +p.shirt : (prev?.n ?? +id.slice(1)), role: String(p.role || prev?.role || "").slice(0, 4) });
+    }
+    if (!roster.length) throw new Error("bad_shape");
+    const sameRoster = roster.length === state.roster.length && roster.every((p) => state.roster.some((q) => q.id === p.id));
+    const startPos = {};
+    for (const p of res.players) {
+      if (!seen.has(String(p?.id))) continue;
+      const prev = frame().pos[p.id];
+      startPos[p.id] = { x: r1(clamp(num(p.x, prev?.x ?? W() / 2), 0, W())), y: r1(clamp(num(p.y, prev?.y ?? H() / 2), 0, H())) };
+    }
+    const ballOf = (b, fb) => (b ? { x: r1(clamp(num(b.x, fb.x), -1, W() + 1)), y: r1(clamp(num(b.y, fb.y), -1, H() + 1)) } : fb);
+    const hl = (arr) => (Array.isArray(arr) ? arr.map(String).filter((id) => seen.has(id)).slice(0, 6) : []);
+    state.roster = roster;
+
+    if (res.kind === "play" && Array.isArray(res.frames) && res.frames.length) {
+      let prevPos = startPos, prevBall = ballOf(res.ball, { x: W() / 2, y: H() / 2 });
+      state.frames = res.frames.slice(0, 16).map((fr, i) => {
+        const pos = {};
+        for (const p of roster) pos[p.id] = { ...prevPos[p.id] };
+        for (const q of Array.isArray(fr.positions) ? fr.positions : []) {
+          if (!seen.has(String(q?.id))) continue;
+          pos[q.id] = { x: r1(clamp(num(q.x, pos[q.id]?.x ?? 0), 0, W())), y: r1(clamp(num(q.y, pos[q.id]?.y ?? 0), 0, H())) };
+        }
+        const ball = ballOf(fr.ball, prevBall);
+        prevPos = pos; prevBall = ball;
+        return { label: String(fr.label || `Frame ${i + 1}`).slice(0, 40), dur: clamp(num(fr.duration, 1.5), .2, 10), pos, ball, zoom: cleanZoom(fr.zoom), arrows: cleanArrows(fr.arrows), highlight: hl(fr.highlights) };
+      });
+      state.cur = 0;
+    } else {
+      const f = { label: frame()?.label || "Start", dur: frame()?.dur ?? 1.5, pos: startPos, ball: ballOf(res.ball, frame().ball), zoom: frame()?.zoom || null, arrows: cleanArrows(res.arrows), highlight: hl(res.highlights) };
+      if (sameRoster) state.frames[state.cur] = f;
+      else { f.zoom = null; state.frames = [f]; state.cur = 0; }
+    }
+    state.title = String(res.title || "New shape").slice(0, 60);
+    state.note = String(res.note || "").slice(0, 600);
+    state.sources = Array.isArray(res.sources) ? res.sources.filter((s) => /^https?:\/\//.test(s?.url || "")).slice(0, 5) : [];
+  }
+
+  async function run(instruction) {
+    instruction = instruction.trim();
+    if (!instruction || busy) return;
+    if (playing) stop();
+    busy = true;
+    $("go").disabled = true;
+    $("thinking").hidden = false;
+    $("thinkingText").textContent = "Claude is reading the pitch…";
+    const slow = setTimeout(() => { $("thinkingText").textContent = "Still working, maybe researching…"; }, 12000);
+    ctl = new AbortController();
+    const before = clone(state);
+    try {
+      const r = await fetch("/api/plan", {
+        method: "POST", headers: { "content-type": "application/json" }, signal: ctl.signal,
+        body: JSON.stringify({ prompt: instruction, state: boardForServer() }),
+      });
+      const res = await r.json().catch(() => null);
+      if (!r.ok) throw { code: "server", message: (res && res.error) || "Claude could not be reached." };
+      apply(res);
+      undoStack.push(before);
+      render();
+      addHistory(instruction, state.title);
+      $("prompt").value = "";
+      if (state.frames.length > 1 && res.kind === "play") play();
+    } catch (e) {
+      state = before;
+      render();
+      showError(e?.code === "server" ? e.message : e?.message === "bad_shape" ? "Claude's answer had no positions in it. Press Show it again." : "Something went wrong reaching Claude. Press Show it again.");
+    } finally {
+      clearTimeout(slow);
+      busy = false;
+      $("go").disabled = false;
+      $("thinking").hidden = true;
+    }
+  }
+  function showError(msg) { const n = $("note"); n.textContent = msg; n.classList.add("err"); }
+
+  // ---------- Voice (browser speech recognition) ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) {
+    const mic = $("mic");
+    mic.hidden = false;
+    let rec = null, heard = false;
+    const setLive = (on) => { mic.classList.toggle("live", on); mic.setAttribute("aria-label", on ? "Stop listening" : "Speak an instruction"); };
+    mic.addEventListener("click", () => {
+      if (rec) { rec.stop(); return; }
+      $("prompt").value = ""; heard = false;
+      rec = new SR(); rec.lang = navigator.language || "en-GB"; rec.interimResults = true; rec.continuous = false;
+      rec.onstart = () => { setLive(true); $("partial").textContent = "Listening…"; };
+      rec.onresult = (ev) => {
+        let interim = "";
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const t = ev.results[i][0].transcript;
+          if (ev.results[i].isFinal) { const box = $("prompt"); box.value = (box.value ? box.value + " " : "") + t.trim(); heard = true; } else interim += t;
+        }
+        $("partial").textContent = interim;
+      };
+      rec.onerror = (ev) => { if (ev.error === "not-allowed" || ev.error === "service-not-allowed") { $("partial").textContent = "Microphone not allowed. Type instead."; mic.hidden = true; } };
+      rec.onend = () => {
+        rec = null; setLive(false);
+        if ($("partial").textContent === "Listening…") $("partial").textContent = "";
+        if (heard && $("prompt").value.trim()) { $("partial").textContent = ""; run($("prompt").value); }
+      };
+      try { rec.start(); } catch { rec = null; setLive(false); }
+    });
+  }
+
+  // ---------- Wiring ----------
+  const CHIPS = [
+    "High press: front three on their back line, our 8 jumps onto their CM",
+    "Show a give-and-go down the left wing as a play in 4 steps, zoom in on it",
+    "2 v 1: two attackers against one defender and the keeper",
+    "Corner kick routine from the right with a near-post flick-on, as a play",
+    "Drop into a low block 4-5-1, stay compact",
+    "Change to KNVB JO11 8 v 8",
+    "Look up how Arne Slot's Liverpool builds up from the back and show it",
+  ];
+  for (const c of CHIPS) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.textContent = c;
+    b.addEventListener("click", () => { $("prompt").value = c; run(c); });
+    $("chips").append(b);
+  }
+  $("form").addEventListener("submit", (e) => { e.preventDefault(); run($("prompt").value); });
+  $("prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run($("prompt").value); } });
+  $("undo").addEventListener("click", () => { if (busy || !undoStack.length) return; if (playing) stop(); state = undoStack.pop(); render(); });
+  $("reset").addEventListener("click", () => { if (busy) return; if (playing) stop(); pushUndo(); state = kickoff(); render(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest("textarea, input")) return;
+    if (e.key === " ") { e.preventDefault(); playing ? stop() : play(); }
+    if (e.key === "ArrowRight" && !playing) { state.cur = Math.min(state.frames.length - 1, state.cur + 1); render(); }
+    if (e.key === "ArrowLeft" && !playing) { state.cur = Math.max(0, state.cur - 1); render(); }
+  });
+
+  render();
+  $("aiDot").className = "dot on";
+  $("aiStatus").textContent = "Claude connected";
+})();
+</script>
+
+</body></html>

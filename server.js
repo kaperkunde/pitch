@@ -324,7 +324,8 @@ function cleanPlan(input, previous) {
     arrows,
     highlights,
     title: typeof input?.title === "string" ? input.title.slice(0, 60) : "",
-    note: typeof input?.note === "string" ? input.note.slice(0, 600) : "",
+    // Web search answers carry <cite index="..."> tags around quoted text; the board shows plain words.
+    note: typeof input?.note === "string" ? input.note.replace(/<\/?cite[^>]*>/g, "").slice(0, 600) : "",
   }
 }
 

@@ -55,3 +55,20 @@ as a plain error the page shows in the coach's-note line.
 
 Player ids are `H1`-`H11` (home) and `A1`-`A11` (away); the number is the shirt number of a 4-3-3:
 1 GK, 2 RB, 3 LB, 4/5 CB, 6 DM, 8/10 CM, 7 RW, 9 ST, 11 LW.
+
+## Token Center and web search through PCP
+
+Two ways to reach Claude, chosen by the environment:
+
+| Variable | Meaning |
+| --- | --- |
+| `TOKENS_URL`, `TOKENS_APP_KEY` | Both set: every call goes through the Token Center's gateway (`$TOKENS_URL/v1/messages`) with this app key. Anthropic's server-side tools are left out, since the center does not price them, and the refusal fallback is off. |
+| `TOKENS_USER` | The one Token Center user every visitor's calls are charged to (default `pitch-public`). Give it credit from the center's admin (Grants: Anthropic, no expiry). |
+| `ANTHROPIC_API_KEY` | Used only when the two above are not set: straight to Anthropic, with Anthropic's own web search. |
+| `PCP_URL`, `PCP_TOKEN` | A PCP MCP endpoint and Touchline's own token for it. With `PCP_SEARCH` set, Claude gets a `web_search` tool that Touchline runs itself through PCP, in either mode. |
+| `PCP_SEARCH` | The PCP tool to search with, as `server/tool`. |
+| `PCP_SEARCH_ARG` | That tool's query argument (default `query`). |
+| `PCP_RUN_TOOL` | The PCP entry that runs it (default `run_read`, which calls `pcp.call(server, tool, {query})`). |
+| `MAX_SEARCHES` | Searches per instruction (default 3). |
+
+The startup line in the logs says which way it runs: `via Token Center … as pitch-public, search PCP …`.

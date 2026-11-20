@@ -15,8 +15,29 @@ const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5"
 // 30 s timeout. Set ANTHROPIC_EFFORT=none for a model that takes no effort.
 const EFFORT = process.env.ANTHROPIC_EFFORT || "low"
 // Server-side refusal fallback (beta). ANTHROPIC_FALLBACKS=off to turn it off.
-const FALLBACKS = process.env.ANTHROPIC_FALLBACKS !== "off"
-const API_URL = `${(process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, "")}/v1/messages`
+// The gateway forwards bodies untouched, but not every beta header, so the fallback is off there.
+const FALLBACKS = process.env.ANTHROPIC_FALLBACKS !== "off" && !(process.env.TOKENS_URL && process.env.TOKENS_APP_KEY)
+// Where Claude is asked. With TOKENS_URL and TOKENS_APP_KEY set, every call goes through the
+// Token Center's gateway (Anthropic's Messages API, metered and charged to one shared user);
+// otherwise straight to Anthropic with ANTHROPIC_API_KEY.
+const TOKENS_URL = (process.env.TOKENS_URL || "").replace(/\/+$/, "")
+const TOKENS_APP_KEY = process.env.TOKENS_APP_KEY || ""
+const TOKENS_USER = process.env.TOKENS_USER || "pitch-public"
+const VIA_TOKENS = Boolean(TOKENS_URL && TOKENS_APP_KEY)
+const API_URL = VIA_TOKENS
+  ? `${TOKENS_URL}/v1/messages`
+  : `${(process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, "")}/v1/messages`
+// Web search through a PCP server (an MCP server) with Touchline's own token: Touchline runs the
+// search itself, as a client tool, because the Token Center does not price Anthropic's
+// server-side search. PCP_SEARCH names the PCP tool as "server/tool"; PCP_SEARCH_ARG is the
+// name of its query argument. Without PCP, direct mode keeps Anthropic's own web search and
+// Token Center mode has none.
+const PCP_URL = process.env.PCP_URL || ""
+const PCP_TOKEN = process.env.PCP_TOKEN || ""
+const PCP_SEARCH = process.env.PCP_SEARCH || ""
+const PCP_SEARCH_ARG = process.env.PCP_SEARCH_ARG || "query"
+const PCP_RUN_TOOL = process.env.PCP_RUN_TOOL || "run_read"
+const PCP_ON = Boolean(PCP_URL && PCP_TOKEN && /^[^/]+\/[^/]+$/.test(PCP_SEARCH))
 const TIMEOUT_MS = 60_000 // one request to Claude
 const TOTAL_MS = 110_000 // the whole answer, searches included
 const MAX_SEARCHES = Number(process.env.MAX_SEARCHES ?? 3)
@@ -164,7 +185,23 @@ const SET_PLAY = {
 // which came back to the model as "search failed" in testing).
 const WEB_SEARCH = { type: "web_search_20250305", name: "web_search", max_uses: MAX_SEARCHES }
 
-const SYSTEM = `You are the assistant coach on a football (soccer) tactics board used by European coaches, from professionals to youth and recreational teams.
+// The same tool, run by Touchline through PCP.
+const PCP_WEB_SEARCH = {
+  name: "web_search",
+  description:
+    "Search the web. Returns result titles, links and snippets. Use it for recent matches, named teams, coaches or players, and rules you are not sure of.",
+  input_schema: {
+    type: "object",
+    properties: { query: { type: "string", description: "What to search for, a few words" } },
+    required: ["query"],
+    additionalProperties: false,
+  },
+}
+const SEARCH_TOOL = PCP_ON ? PCP_WEB_SEARCH : VIA_TOKENS ? null : WEB_SEARCH
+const TOOLS = [SET_FORMATION, SET_PLAY, ...(SEARCH_TOOL ? [SEARCH_TOOL] : [])]
+
+const SEARCH_HINT = `You may use web_search when the instruction needs facts you are not sure of: a named team's, coach's or player's style, a league's or association's rules for a format, a famous goal or set piece. Search briefly (one or two searches), then answer with the tool. Never search for things you already know.`
+const SYSTEM_BASE = `You are the assistant coach on a football (soccer) tactics board used by European coaches, from professionals to youth and recreational teams.
 Coordinates are metres. x runs from 0 (the home team's goal line) to the pitch length; y from 0 (top touchline on screen) to the pitch width. The current pitch size comes with the board.
 The home team (ids H1..Hn) defends the goal at x=0 and attacks towards the far goal line; its left flank is the top (small y), its right flank the bottom (large y).
 The away team (ids A1..An) defends the far goal and attacks towards x=0; its left flank is the bottom (large y).
@@ -175,8 +212,8 @@ Otherwise move the players the instruction concerns realistically (keep the shap
 Two ways to answer, always exactly one tool call, listing every player who is on the pitch:
 - set_formation for a still picture of where everyone stands (it changes only the frame the coach is looking at).
 - set_play for anything that moves over time: a play, a pattern, a routine, a sequence, "show me how", "step by step". Give 3 to 8 keyframes with realistic timings, keep the ball moving believably (passes travel, players run onto them), and zoom the camera onto the action when it is in one area. If the board already has frames and the coach asks to change the play, return the whole play again with the change.
-Arrows: team "home" or "away" for runs, "ball" for a pass or shot. Use them sparingly, and highlights for the players the instruction names.
-You may use web_search when the instruction needs facts you are not sure of: a named team's, coach's or player's style, a league's or association's rules for a format, a famous goal or set piece. Search briefly (one or two searches), then answer with the tool. Never search for things you already know.`
+Arrows: team "home" or "away" for runs, "ball" for a pass or shot. Use them sparingly, and highlights for the players the instruction names.`
+const SYSTEM = SEARCH_TOOL ? `${SYSTEM_BASE}\n${SEARCH_HINT}` : SYSTEM_BASE
 
 // ---------------------------------------------------------------- helpers
 
@@ -367,13 +404,99 @@ function sourcesOf(content) {
   return out.slice(0, 5)
 }
 
+// ---------------------------------------------------------------- web search through PCP
+
+// A minimal MCP client (Streamable HTTP): initialize once, then tools/call. PCP runs owner-allowed
+// tools through its run_read entry, a small program that calls one tool: pcp.call(server, tool, args).
+let pcpSession = null
+let pcpReady = false
+let rpcId = 0
+
+function rpcResult(text, contentType, id) {
+  if (!/event-stream/.test(contentType ?? "")) return JSON.parse(text)
+  let found = null
+  for (const line of text.split("\n")) {
+    if (!line.startsWith("data:")) continue
+    try {
+      const msg = JSON.parse(line.slice(5))
+      if (msg?.id === id) found = msg
+    } catch {}
+  }
+  if (!found) throw new Error("PCP sent no answer")
+  return found
+}
+
+async function mcp(method, params, { notify = false } = {}) {
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    authorization: `Bearer ${PCP_TOKEN}`,
+  }
+  if (pcpSession) headers["mcp-session-id"] = pcpSession
+  const id = ++rpcId
+  const body = notify ? { jsonrpc: "2.0", method, params } : { jsonrpc: "2.0", id, method, params }
+  const r = await fetch(PCP_URL, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(45_000) })
+  const sid = r.headers.get("mcp-session-id")
+  if (sid) pcpSession = sid
+  const text = await r.text()
+  if (notify) return null
+  if (!r.ok) throw Object.assign(new Error(`PCP answered ${r.status}`), { status: r.status })
+  const msg = rpcResult(text, r.headers.get("content-type"), id)
+  if (msg.error) throw new Error(`PCP: ${String(msg.error.message ?? "error").slice(0, 200)}`)
+  return msg.result
+}
+
+async function pcpInit() {
+  if (pcpReady) return
+  await mcp("initialize", {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "touchline", version: "1.0.0" },
+  })
+  await mcp("notifications/initialized", {}, { notify: true })
+  pcpReady = true
+}
+
+async function pcpSearch(query) {
+  const [server, tool] = PCP_SEARCH.split("/")
+  const code = `return await pcp.call(${JSON.stringify(server)}, ${JSON.stringify(tool)}, ${JSON.stringify({ [PCP_SEARCH_ARG]: query })})`
+  const call = async () => {
+    await pcpInit()
+    return mcp("tools/call", { name: PCP_RUN_TOOL, arguments: { code } })
+  }
+  let result
+  try {
+    result = await call()
+  } catch (err) {
+    // A session the server forgot (a restart): start a new one, once.
+    if (err.status !== 400 && err.status !== 404) throw err
+    pcpSession = null
+    pcpReady = false
+    result = await call()
+  }
+  const text = (result?.content ?? []).filter((c) => c?.type === "text").map((c) => c.text).join("\n")
+  if (result?.isError) throw new Error(text.slice(0, 300) || "PCP refused the search")
+  return text
+}
+
+// Links in a search answer, for the "Claude looked up" list.
+const URL_RE = /https?:\/\/[^\s"'<>)\]\\]+/g
+function linksOf(text) {
+  const out = []
+  for (const url of text.match(URL_RE) ?? []) {
+    const clean = url.replace(/[.,;:]+$/, "")
+    if (!out.some((o) => o.url === clean)) out.push({ url: clean, title: clean.replace(/^https?:\/\/(www\.)?/, "").slice(0, 120) })
+  }
+  return out
+}
+
 // ---------------------------------------------------------------- /api/plan
 
 async function plan(req, res) {
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = VIA_TOKENS ? TOKENS_APP_KEY : process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
     return sendJson(res, 503, {
-      error: "The server has no ANTHROPIC_API_KEY set, so it cannot ask Claude. Set it and restart.",
+      error: "The server has no ANTHROPIC_API_KEY (or TOKENS_URL and TOKENS_APP_KEY) set, so it cannot ask Claude.",
     })
   }
 
@@ -410,20 +533,28 @@ async function plan(req, res) {
     "anthropic-version": "2023-06-01",
   }
   if (FALLBACKS) headers["anthropic-beta"] = "server-side-fallback-2026-07-01"
+  if (VIA_TOKENS) {
+    // One shared user pays for every visitor; the purpose and activity show on the center's ledger.
+    headers["x-token-user"] = encodeURIComponent(TOKENS_USER)
+    headers["x-token-purpose"] = "touchline"
+    headers["x-token-activity"] = "plan"
+  }
 
   const started = Date.now()
+  const found = [] // links from searches run through PCP
+  let searches = 0
   const content = [] // everything Claude said, across continuations
   let model = MODEL
   // A server-side search can pause the turn (pause_turn); a turn can also end
   // with words and no board. Each is continued, a few times at most.
-  for (let round = 0; round < 4; round++) {
+  for (let round = 0; round < 6; round++) {
     const left = TOTAL_MS - (Date.now() - started)
     if (left < 5000) break
     const request = {
       model: MODEL,
       max_tokens: 16000,
       system: SYSTEM,
-      tools: [SET_FORMATION, SET_PLAY, WEB_SEARCH],
+      tools: TOOLS,
       // Forced tool_choice is refused (400) by Sonnet 5.5 / Opus 5.5, so the
       // prompt requires the call and strict mode holds its arguments.
       tool_choice: { type: "auto" }, // parallel calls stay allowed: web_search_20260209 (programmatic) refuses disable_parallel_tool_use
@@ -478,12 +609,44 @@ async function plan(req, res) {
     const call = blocks.find((b) => b.type === "tool_use" && (b.name === "set_formation" || b.name === "set_play"))
     if (call) {
       const plan = call.name === "set_play" ? cleanPlay(call.input, current) : { ...cleanPlan(call.input, current), kind: "formation" }
-      const searches = content.filter((b) => b.type === "server_tool_use").length
-      console.log(`[plan] ${call.name} rounds=${round + 1} searches=${searches} ${Date.now() - started}ms`)
-      return sendJson(res, 200, { ...plan, sources: sourcesOf(content), model })
+      searches += content.filter((b) => b.type === "server_tool_use").length
+      const sources = [...sourcesOf(content), ...found].filter((s, i, all) => all.findIndex((o) => o.url === s.url) === i).slice(0, 5)
+      console.log(`[plan] ${call.name} rounds=${round + 1} searches=${searches} via=${VIA_TOKENS ? "tokens" : "anthropic"} ${Date.now() - started}ms`)
+      return sendJson(res, 200, { ...plan, sources, model })
     }
     messages.push({ role: "assistant", content: blocks })
     if (data?.stop_reason === "pause_turn") continue // the server resumes the search by itself
+    const asks = blocks.filter((b) => b.type === "tool_use" && b.name === "web_search")
+    if (PCP_ON && asks.length) {
+      // Run Claude's searches here, through PCP, and hand back what came of each.
+      const results = []
+      for (const ask of asks) {
+        let text
+        let isError = false
+        if (searches >= MAX_SEARCHES) {
+          text = "Search limit reached. Draw the board now with what you know."
+          isError = true
+        } else {
+          searches++
+          try {
+            text = (await pcpSearch(String(ask.input?.query ?? "").slice(0, 300))).slice(0, 8000)
+            found.push(...linksOf(text))
+          } catch (err) {
+            console.error(`[plan] pcp search failed: ${String(err?.message).slice(0, 200)}`)
+            text = "The search did not work. Draw the board from what you know and say so in the note."
+            isError = true
+          }
+        }
+        results.push({ type: "tool_result", tool_use_id: ask.id, content: text, ...(isError ? { is_error: true } : {}) })
+      }
+      messages.push({ role: "user", content: results })
+      continue
+    }
+    if (asks.length) {
+      // A search tool Claude cannot use here: answer it so the conversation stays valid.
+      messages.push({ role: "user", content: asks.map((a) => ({ type: "tool_result", tool_use_id: a.id, content: "Search is not available. Draw the board now.", is_error: true })) })
+      continue
+    }
     messages.push({ role: "user", content: "Now draw it: call set_formation or set_play." })
   }
   console.error(`[plan] no tool call after continuing`)
@@ -538,9 +701,9 @@ const server = createServer(async (req, res) => {
 
 server.requestTimeout = 130_000
 server.listen(PORT, HOST, () => {
-  console.log(
-    `Touchline on http://${HOST}:${PORT} (model ${MODEL}, key ${process.env.ANTHROPIC_API_KEY ? "set" : "NOT set"})`,
-  )
+  const via = VIA_TOKENS ? `Token Center ${TOKENS_URL} as ${TOKENS_USER}` : `Anthropic, key ${process.env.ANTHROPIC_API_KEY ? "set" : "NOT set"}`
+  const search = PCP_ON ? `PCP ${PCP_SEARCH}` : SEARCH_TOOL ? "Anthropic web search" : "none"
+  console.log(`Touchline on http://${HOST}:${PORT} (model ${MODEL}, via ${via}, search ${search})`)
 })
 
 for (const sig of ["SIGTERM", "SIGINT"]) {

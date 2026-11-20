@@ -189,7 +189,7 @@ const WEB_SEARCH = { type: "web_search_20250305", name: "web_search", max_uses: 
 const PCP_WEB_SEARCH = {
   name: "web_search",
   description:
-    "Search the web. Returns result titles, links and snippets. Use it for recent matches, named teams, coaches or players, and rules you are not sure of.",
+    "Search the web: recent news (newest first, with dates) and encyclopedia pages. Returns titles, links, sources, dates and snippets. Use it for recent matches, named teams, coaches or players, famous plays, and rules you are not sure of. A few plain words work best.",
   input_schema: {
     type: "object",
     properties: { query: { type: "string", description: "What to search for, a few words" } },
@@ -539,7 +539,8 @@ async function pcpSearch(query) {
 const URL_RE = /https?:\/\/[^\s"'<>)\]\\]+/g
 function linksOf(text) {
   try {
-    const list = JSON.parse(text)
+    const parsed = JSON.parse(text)
+    const list = Array.isArray(parsed) ? parsed : parsed?.results // a list, or the Web search wrapper's {query, results}
     if (Array.isArray(list)) {
       return list.filter((r) => typeof r?.url === "string").map((r) => ({ url: r.url, title: String(r.title || r.url).slice(0, 120) }))
     }

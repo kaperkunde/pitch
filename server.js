@@ -457,60 +457,93 @@ async function pcpInit() {
   pcpReady = true
 }
 
-// The program PCP runs: call the search tool and, when it answers with DuckDuckGo's HTML results
-// page, turn that into [{title, url, snippet}] there, so only a few hundred bytes come back.
-// A bot-check page instead of results is an error, said in words.
-function searchProgram(server, tool, args) {
-  return `
-const raw = await pcp.call(${JSON.stringify(server)}, ${JSON.stringify(tool)}, ${JSON.stringify(args)});
-const page = typeof raw === "string" ? raw : null;
-if (!page || !/<html|result__/i.test(page)) return raw;
-if (!/result__a/.test(page)) {
-  if (/anomaly/i.test(page)) throw new Error("DuckDuckGo refused the search with a bot check, so there are no results.");
-  return [];
+// DuckDuckGo's HTML results page as [{title, url, snippet}], or null when the page is not one.
+// A bot-check page instead of results is an error, said in words. Runs here, and inside PCP
+// (its source goes into the program below) where the token may run programs.
+function parseDdgHtml(page) {
+  if (typeof page !== "string" || !/<html|result__/i.test(page)) return null
+  if (!/result__a/.test(page)) {
+    if (/anomaly/i.test(page)) throw new Error("DuckDuckGo refused the search with a bot check, so there are no results.")
+    return []
+  }
+  const text = (s) => String(s || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim()
+  const anchors = [...page.matchAll(/<a\b([^>]*\bclass="[^"]*\bresult__a\b[^"]*"[^>]*)>([\s\S]*?)<\/a>/g)]
+  const out = []
+  anchors.forEach((m, i) => {
+    if (out.length >= 8) return
+    const href = (m[1].match(/\bhref="([^"]*)"/) || [])[1] || ""
+    const uddg = href.match(/[?&]uddg=([^&]+)/)
+    const url = uddg ? decodeURIComponent(uddg[1]) : href.replace(/^\/\//, "https://")
+    if (!/^https?:/.test(url) || /duckduckgo\.com\/y\.js/.test(url)) return
+    const end = i + 1 < anchors.length ? anchors[i + 1].index : page.length
+    const rest = page.slice(m.index + m[0].length, end)
+    const snip = rest.match(/class="[^"]*\bresult__snippet\b[^"]*"[^>]*>([\s\S]*?)<\/(?:a|td|div)>/)
+    out.push({ title: text(m[2]).slice(0, 160), url, snippet: text(snip && snip[1]).slice(0, 300) })
+  })
+  return out
 }
-const text = (s) => String(s || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\\s+/g, " ").trim();
-const anchors = [...page.matchAll(/<a\\b([^>]*\\bclass="[^"]*\\bresult__a\\b[^"]*"[^>]*)>([\\s\\S]*?)<\\/a>/g)];
-const out = [];
-anchors.forEach((m, i) => {
-  if (out.length >= 8) return;
-  const href = (m[1].match(/\\bhref="([^"]*)"/) || [])[1] || "";
-  const uddg = href.match(/[?&]uddg=([^&]+)/);
-  let url = uddg ? decodeURIComponent(uddg[1]) : href.replace(/^\\/\\//, "https://");
-  if (!/^https?:/.test(url) || /duckduckgo\\.com\\/y\\.js/.test(url)) return;
-  const end = i + 1 < anchors.length ? anchors[i + 1].index : page.length;
-  const rest = page.slice(m.index + m[0].length, end);
-  const snip = rest.match(/class="[^"]*\\bresult__snippet\\b[^"]*"[^>]*>([\\s\\S]*?)<\\/(?:a|td|div)>/);
-  out.push({ title: text(m[2]).slice(0, 160), url, snippet: text(snip && snip[1]).slice(0, 300) });
-});
-return out;`
+
+// The program PCP runs when the token may run programs: one call, parsed there.
+function searchProgram(server, tool, args) {
+  return `${parseDdgHtml.toString()}
+const raw = await pcp.call(${JSON.stringify(server)}, ${JSON.stringify(tool)}, ${JSON.stringify(args)});
+const parsed = parseDdgHtml(raw);
+return parsed === null ? raw : parsed;`
+}
+
+// How this token reaches the search tool: a program (run_read), or PCP's own way for a token
+// without programs, search (a call handle for the tool) and then execute_read with it.
+let pcpEntries = null
+let searchHandle = null
+async function pcpEntriesOf() {
+  if (!pcpEntries) pcpEntries = new Set(((await mcp("tools/list", {}))?.tools ?? []).map((t) => t.name))
+  return pcpEntries
+}
+const textOf = (result) => (result?.content ?? []).filter((c) => c?.type === "text").map((c) => c.text).join("\n")
+async function callHandle(fresh) {
+  if (searchHandle && !fresh) return searchHandle
+  const found = textOf(await mcp("tools/call", { name: "search", arguments: { ref: PCP_SEARCH } }))
+  const handle = found.match(/"call_handle"\s*:\s*"([^"]+)"/)?.[1] ?? found.match(/\bch_[A-Za-z0-9_-]+/)?.[0]
+  if (!handle) throw new Error(`PCP has no ${PCP_SEARCH} for this token`)
+  searchHandle = handle
+  return handle
 }
 
 async function pcpSearch(query) {
   const [server, tool] = PCP_SEARCH.split("/")
-  const code = searchProgram(server, tool, { [PCP_SEARCH_ARG]: query })
-  const call = async () => {
+  const args = { [PCP_SEARCH_ARG]: query }
+  const once = async (fresh) => {
     await pcpInit()
-    return mcp("tools/call", { name: PCP_RUN_TOOL, arguments: { code } })
+    const entries = await pcpEntriesOf()
+    const result = entries.has(PCP_RUN_TOOL)
+      ? await mcp("tools/call", { name: PCP_RUN_TOOL, arguments: { code: searchProgram(server, tool, args) } })
+      : await mcp("tools/call", { name: "execute_read", arguments: { call_handle: await callHandle(fresh), arguments: args } })
+    const text = textOf(result)
+    if (result?.isError) throw Object.assign(new Error(text.slice(0, 300) || "PCP refused the search"), { stale: true })
+    const parsed = parseDdgHtml(text)
+    return parsed === null ? text : JSON.stringify(parsed)
   }
-  let result
   try {
-    result = await call()
+    return await once(false)
   } catch (err) {
-    // A session the server forgot (a restart): start a new one, once.
-    if (err.status !== 400 && err.status !== 404) throw err
+    // A session the server forgot (a restart) or a call handle gone stale: start again, once.
+    if ((err.status !== 400 && err.status !== 404 && !err.stale) || /bot check/.test(err.message)) throw err
     pcpSession = null
     pcpReady = false
-    result = await call()
+    pcpEntries = null
+    return once(true)
   }
-  const text = (result?.content ?? []).filter((c) => c?.type === "text").map((c) => c.text).join("\n")
-  if (result?.isError) throw new Error(text.slice(0, 300) || "PCP refused the search")
-  return text
 }
 
 // Links in a search answer, for the "Claude looked up" list.
 const URL_RE = /https?:\/\/[^\s"'<>)\]\\]+/g
 function linksOf(text) {
+  try {
+    const list = JSON.parse(text)
+    if (Array.isArray(list)) {
+      return list.filter((r) => typeof r?.url === "string").map((r) => ({ url: r.url, title: String(r.title || r.url).slice(0, 120) }))
+    }
+  } catch {}
   const out = []
   for (const url of text.match(URL_RE) ?? []) {
     const clean = url.replace(/[.,;:]+$/, "")
@@ -739,7 +772,8 @@ server.listen(PORT, HOST, () => {
       .then(() => mcp("tools/list", {}))
       .then((r) => {
         const names = (r?.tools ?? []).map((t) => t.name)
-        console.log(`[pcp] connected to ${PCP_URL}; ${names.includes(PCP_RUN_TOOL) ? PCP_RUN_TOOL + " is there" : "NO " + PCP_RUN_TOOL + " among " + names.join(", ")}`)
+        const way = names.includes(PCP_RUN_TOOL) ? `a ${PCP_RUN_TOOL} program` : names.includes("execute_read") ? "search, then execute_read" : `nothing usable among ${names.join(", ")}`
+        console.log(`[pcp] connected; ${PCP_SEARCH} runs through ${way}`)
       })
       .catch((err) => console.error(`[pcp] cannot connect to ${PCP_URL}: ${String(err?.message).slice(0, 200)}`))
   }

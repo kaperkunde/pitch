@@ -733,6 +733,16 @@ server.listen(PORT, HOST, () => {
   const via = VIA_TOKENS ? `Token Center ${TOKENS_URL} as ${TOKENS_USER}` : `Anthropic, key ${process.env.ANTHROPIC_API_KEY ? "set" : "NOT set"}`
   const search = PCP_ON ? `PCP ${PCP_SEARCH}` : SEARCH_TOOL ? "Anthropic web search" : "none"
   console.log(`Touchline on http://${HOST}:${PORT} (model ${MODEL}, via ${via}, search ${search})`)
+  // Check the PCP connection once (a handshake and a tool list, no search), so the log says whether search will work.
+  if (PCP_ON) {
+    pcpInit()
+      .then(() => mcp("tools/list", {}))
+      .then((r) => {
+        const names = (r?.tools ?? []).map((t) => t.name)
+        console.log(`[pcp] connected to ${PCP_URL}; ${names.includes(PCP_RUN_TOOL) ? PCP_RUN_TOOL + " is there" : "NO " + PCP_RUN_TOOL + " among " + names.join(", ")}`)
+      })
+      .catch((err) => console.error(`[pcp] cannot connect to ${PCP_URL}: ${String(err?.message).slice(0, 200)}`))
+  }
 })
 
 for (const sig of ["SIGTERM", "SIGINT"]) {

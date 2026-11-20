@@ -457,9 +457,38 @@ async function pcpInit() {
   pcpReady = true
 }
 
+// The program PCP runs: call the search tool and, when it answers with DuckDuckGo's HTML results
+// page, turn that into [{title, url, snippet}] there, so only a few hundred bytes come back.
+// A bot-check page instead of results is an error, said in words.
+function searchProgram(server, tool, args) {
+  return `
+const raw = await pcp.call(${JSON.stringify(server)}, ${JSON.stringify(tool)}, ${JSON.stringify(args)});
+const page = typeof raw === "string" ? raw : null;
+if (!page || !/<html|result__/i.test(page)) return raw;
+if (!/result__a/.test(page)) {
+  if (/anomaly/i.test(page)) throw new Error("DuckDuckGo refused the search with a bot check, so there are no results.");
+  return [];
+}
+const text = (s) => String(s || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\\s+/g, " ").trim();
+const anchors = [...page.matchAll(/<a\\b([^>]*\\bclass="[^"]*\\bresult__a\\b[^"]*"[^>]*)>([\\s\\S]*?)<\\/a>/g)];
+const out = [];
+anchors.forEach((m, i) => {
+  if (out.length >= 8) return;
+  const href = (m[1].match(/\\bhref="([^"]*)"/) || [])[1] || "";
+  const uddg = href.match(/[?&]uddg=([^&]+)/);
+  let url = uddg ? decodeURIComponent(uddg[1]) : href.replace(/^\\/\\//, "https://");
+  if (!/^https?:/.test(url) || /duckduckgo\\.com\\/y\\.js/.test(url)) return;
+  const end = i + 1 < anchors.length ? anchors[i + 1].index : page.length;
+  const rest = page.slice(m.index + m[0].length, end);
+  const snip = rest.match(/class="[^"]*\\bresult__snippet\\b[^"]*"[^>]*>([\\s\\S]*?)<\\/(?:a|td|div)>/);
+  out.push({ title: text(m[2]).slice(0, 160), url, snippet: text(snip && snip[1]).slice(0, 300) });
+});
+return out;`
+}
+
 async function pcpSearch(query) {
   const [server, tool] = PCP_SEARCH.split("/")
-  const code = `return await pcp.call(${JSON.stringify(server)}, ${JSON.stringify(tool)}, ${JSON.stringify({ [PCP_SEARCH_ARG]: query })})`
+  const code = searchProgram(server, tool, { [PCP_SEARCH_ARG]: query })
   const call = async () => {
     await pcpInit()
     return mcp("tools/call", { name: PCP_RUN_TOOL, arguments: { code } })

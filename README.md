@@ -67,8 +67,10 @@ Two ways to reach Claude, chosen by the environment:
 | `ANTHROPIC_API_KEY` | Used only when the two above are not set: straight to Anthropic, with Anthropic's own web search. |
 | `PCP_URL`, `PCP_TOKEN` | A PCP MCP endpoint and Touchline's own token for it. With `PCP_SEARCH` set, Claude gets a `web_search` tool that Touchline runs itself through PCP, in either mode. |
 | `PCP_SEARCH` | The PCP tool to search with, as `server/tool`. |
-| `PCP_SEARCH_ARG` | That tool's query argument (default `query`). |
+| `PCP_SEARCH_ARG` | That tool's query argument (default `query`; `q` for `duckduckgo-html-search/search_html`). |
 | `PCP_RUN_TOOL` | The PCP entry that runs it (default `run_read`, which calls `pcp.call(server, tool, {query})`). |
 | `MAX_SEARCHES` | Searches per instruction (default 3). |
 
 The startup line in the logs says which way it runs: `via Token Center … as pitch-public, search PCP …`.
+
+On pitch.kaperkun.de search runs through AJ's cloud PCP (`https://aj.pcp.gg/mcp`, `PCP_SEARCH=duckduckgo-html-search/search_html`, `PCP_SEARCH_ARG=q`) with a token of Touchline's own, kept only as a Coolify secret. That tool returns DuckDuckGo's HTML results page; the program Touchline sends to PCP (`searchProgram` in `server.js`) turns it into `[{title, url, snippet}]` there, and reports DuckDuckGo's bot check as an error rather than as no results.

@@ -743,6 +743,19 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/plain", "cache-control": "no-store" })
       return res.end("ok")
     }
+    if (pathname === "/api/tokens/webhook") {
+      // The Token Center tells its apps about credit (grant.received, balance.low, ...). Touchline
+      // has no users to tell, so it only notes the event type; nothing is acted on, so nothing
+      // needs verifying. Answering 2xx keeps the center's delivery queue clean.
+      if (req.method !== "POST") return sendJson(res, 405, { error: "Use POST" }, { allow: "POST" })
+      let type = "unknown"
+      try {
+        type = String(JSON.parse(await readBody(req))?.type ?? "unknown").slice(0, 60)
+      } catch {}
+      console.log(`[tokens] webhook ${type}`)
+      res.writeHead(204)
+      return res.end()
+    }
     if (pathname === "/api/plan") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "Use POST" }, { allow: "POST" })
       return await plan(req, res)

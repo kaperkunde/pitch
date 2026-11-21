@@ -1,4 +1,4 @@
-// Touchline: a voice/text driven tactics board.
+// Pitch: a voice/text driven tactics board.
 // Plain Node (node:http), no dependencies. Serves public/index.html and
 // POST /api/plan, which asks Claude for new positions through a tool call.
 
@@ -27,7 +27,7 @@ const VIA_TOKENS = Boolean(TOKENS_URL && TOKENS_APP_KEY)
 const API_URL = VIA_TOKENS
   ? `${TOKENS_URL}/v1/messages`
   : `${(process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, "")}/v1/messages`
-// Web search through a PCP server (an MCP server) with Touchline's own token: Touchline runs the
+// Web search through a PCP server (an MCP server) with Pitch's own token: Pitch runs the
 // search itself, as a client tool, because the Token Center does not price Anthropic's
 // server-side search. PCP_SEARCH names the PCP tool as "server/tool"; PCP_SEARCH_ARG is the
 // name of its query argument. Without PCP, direct mode keeps Anthropic's own web search and
@@ -185,7 +185,7 @@ const SET_PLAY = {
 // which came back to the model as "search failed" in testing).
 const WEB_SEARCH = { type: "web_search_20250305", name: "web_search", max_uses: MAX_SEARCHES }
 
-// The same tool, run by Touchline through PCP.
+// The same tool, run by Pitch through PCP.
 const PCP_WEB_SEARCH = {
   name: "web_search",
   description:
@@ -451,7 +451,7 @@ async function pcpInit() {
   await mcp("initialize", {
     protocolVersion: "2025-06-18",
     capabilities: {},
-    clientInfo: { name: "touchline", version: "1.0.0" },
+    clientInfo: { name: "pitch", version: "1.0.0" },
   })
   await mcp("notifications/initialized", {}, { notify: true })
   pcpReady = true
@@ -599,7 +599,7 @@ async function plan(req, res) {
   if (VIA_TOKENS) {
     // One shared user pays for every visitor; the purpose and activity show on the center's ledger.
     headers["x-token-user"] = encodeURIComponent(TOKENS_USER)
-    headers["x-token-purpose"] = "touchline"
+    headers["x-token-purpose"] = "pitch"
     headers["x-token-activity"] = "plan"
   }
 
@@ -745,7 +745,7 @@ const server = createServer(async (req, res) => {
       return res.end("ok")
     }
     if (pathname === "/api/tokens/webhook") {
-      // The Token Center tells its apps about credit (grant.received, balance.low, ...). Touchline
+      // The Token Center tells its apps about credit (grant.received, balance.low, ...). Pitch
       // has no users to tell, so it only notes the event type; nothing is acted on, so nothing
       // needs verifying. Answering 2xx keeps the center's delivery queue clean.
       if (req.method !== "POST") return sendJson(res, 405, { error: "Use POST" }, { allow: "POST" })
@@ -779,7 +779,7 @@ server.requestTimeout = 130_000
 server.listen(PORT, HOST, () => {
   const via = VIA_TOKENS ? `Token Center ${TOKENS_URL} as ${TOKENS_USER}` : `Anthropic, key ${process.env.ANTHROPIC_API_KEY ? "set" : "NOT set"}`
   const search = PCP_ON ? `PCP ${PCP_SEARCH}` : SEARCH_TOOL ? "Anthropic web search" : "none"
-  console.log(`Touchline on http://${HOST}:${PORT} (model ${MODEL}, via ${via}, search ${search})`)
+  console.log(`Pitch on http://${HOST}:${PORT} (model ${MODEL}, via ${via}, search ${search})`)
   // Check the PCP connection once (a handshake and a tool list, no search), so the log says whether search will work.
   if (PCP_ON) {
     pcpInit()

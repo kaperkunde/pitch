@@ -1,4 +1,4 @@
-# Touchline
+# Pitch
 
 An iPad-friendly football tactics board. A coach speaks or types an instruction ("move the back
 four up ten metres, left winger tuck inside, press their keeper"); the server asks Claude for new
@@ -21,8 +21,8 @@ node server.js                      # http://localhost:3000
 Or with Docker:
 
 ```sh
-docker build -t touchline .
-docker run --rm -p 3000:3000 -e ANTHROPIC_API_KEY touchline
+docker build -t pitch .
+docker run --rm -p 3000:3000 -e ANTHROPIC_API_KEY pitch
 ```
 
 Without a key the page still loads and `/api/plan` answers `503` with
@@ -65,7 +65,7 @@ Two ways to reach Claude, chosen by the environment:
 | `TOKENS_URL`, `TOKENS_APP_KEY` | Both set: every call goes through the Token Center's gateway (`$TOKENS_URL/v1/messages`) with this app key. Anthropic's server-side tools are left out, since the center does not price them, and the refusal fallback is off. |
 | `TOKENS_USER` | The one Token Center user every visitor's calls are charged to (default `pitch-public`). Give it credit from the center's admin (Grants: Anthropic, no expiry). |
 | `ANTHROPIC_API_KEY` | Used only when the two above are not set: straight to Anthropic, with Anthropic's own web search. |
-| `PCP_URL`, `PCP_TOKEN` | A PCP MCP endpoint and Touchline's own token for it. With `PCP_SEARCH` set, Claude gets a `web_search` tool that Touchline runs itself through PCP, in either mode. |
+| `PCP_URL`, `PCP_TOKEN` | A PCP MCP endpoint and Pitch's own token for it. With `PCP_SEARCH` set, Claude gets a `web_search` tool that Pitch runs itself through PCP, in either mode. |
 | `PCP_SEARCH` | The PCP tool to search with, as `server/tool`. |
 | `PCP_SEARCH_ARG` | That tool's query argument (default `query`; `q` for `duckduckgo-html-search/search_html`). |
 | `PCP_RUN_TOOL` | The PCP entry that runs it (default `run_read`, which calls `pcp.call(server, tool, {query})`). |
